@@ -18,6 +18,7 @@ import org.eclipse.paho.client.mqttv3.MqttPingSender;
 import org.eclipse.paho.client.mqttv3.internal.ClientComms;
 
 import android.annotation.SuppressLint;
+import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
@@ -97,9 +98,13 @@ class AlarmPingSender implements MqttPingSender {
 		Log.d(TAG, "Unregister alarmreceiver to MqttService"+comms.getClient().getClientId());
 		if(hasStarted){
 			if(pendingIntent != null){
-				// Cancel Alarm.
-				//AlarmManager alarmManager = (AlarmManager) service.getSystemService(Service.ALARM_SERVICE);
-				//alarmManager.cancel(pendingIntent);
+				// Cancel the pending alarm - schedule() now actually uses AlarmManager
+				// instead of firing immediately, so this must be cancelled on stop()
+				// or a stale alarm would still fire after disconnect.
+				AlarmManager alarmManager = (AlarmManager) service.getSystemService(Service.ALARM_SERVICE);
+				if (alarmManager != null) {
+					alarmManager.cancel(pendingIntent);
+				}
 				WorkManager.getInstance(that.service).cancelAllWorkByTag("AlarmWorkerTAG");
 			}
 
@@ -116,13 +121,22 @@ class AlarmPingSender implements MqttPingSender {
 		long nextAlarmInMilliseconds = System.currentTimeMillis()
 				+ delayInMilliseconds;
 		Log.d(TAG, "Schedule next alarm at " + nextAlarmInMilliseconds);
-		Log.d(TAG, "Alarm scheule using setExactAndAllowWhileIdle, next: " + delayInMilliseconds);
-		Log.d(TAG, "Alarm scheule using setExact, delay: " + delayInMilliseconds);
-			String action = MqttServiceConstants.PING_SENDER
-					+ comms.getClient().getClientId();
-			Intent intent = new Intent(action);
-			that.service.sendBroadcast(intent);
-
+		AlarmManager alarmManager = (AlarmManager) service.getSystemService(Service.ALARM_SERVICE);
+		if (alarmManager == null || pendingIntent == null) {
+			return;
+		}
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+			Log.d(TAG, "Alarm scheule using setExactAndAllowWhileIdle, next: " + delayInMilliseconds);
+			alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,
+					nextAlarmInMilliseconds, pendingIntent);
+		} else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+			Log.d(TAG, "Alarm scheule using setExact, delay: " + delayInMilliseconds);
+			alarmManager.setExact(AlarmManager.RTC_WAKEUP,
+					nextAlarmInMilliseconds, pendingIntent);
+		} else {
+			alarmManager.set(AlarmManager.RTC_WAKEUP,
+					nextAlarmInMilliseconds, pendingIntent);
+		}
 	}
 
 	/*
