@@ -1,0 +1,1 @@
+// no-op: real publish.gradle (Maven Central credentials) is gitignored upstream and not needed for JitPack builds
